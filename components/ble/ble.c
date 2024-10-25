@@ -16,6 +16,20 @@
 #define BLE_TAG __FILE__
 
 static s_gatts_char_inst_t service_wifi_characteristics[BLE_SERVICE_WIFI_CHAR_ID_MAX] = {
+    [BLE_SERVICE_WIFI_CHAR_ID_ENABLE_WIFI] = {
+        .char_uuid = {
+            .len = ESP_UUID_LEN_16,
+            .uuid = {
+                .uuid16 = BLE_SERVICE_WIFI_CHARACTERISTICS_ENABLE_WIFI_UUID,
+            },
+        },
+        .perm = ESP_GATT_PERM_WRITE | ESP_GATT_PERM_READ,
+        .property = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ,
+        .descriptors_len = 0,
+        .descriptors = NULL,
+        .descriptors_added = 0,
+        .added = false
+    },
     [BLE_SERVICE_WIFI_CHAR_ID_GET_WIFI_DETAILS] = {
         .char_uuid = {
             .len = ESP_UUID_LEN_16,
@@ -43,6 +57,20 @@ static s_gatts_char_inst_t service_wifi_characteristics[BLE_SERVICE_WIFI_CHAR_ID
         .descriptors = NULL,
         .descriptors_added = 0,
         .added = false,
+    },
+    [BLE_SERVICE_WIFI_CHAR_ID_DISABLE_WIFI] = {
+        .char_uuid = {
+            .len = ESP_UUID_LEN_16,
+            .uuid = {
+                .uuid16 = BLE_SERVICE_WIFI_CHARACTERISTICS_DISABLE_WIFI_UUID,
+            },
+        },
+        .perm = ESP_GATT_PERM_WRITE | ESP_GATT_PERM_READ,
+        .property = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ,
+        .descriptors_len = 0,
+        .descriptors = NULL,
+        .descriptors_added = 0,
+        .added = false
     },
 };
 
