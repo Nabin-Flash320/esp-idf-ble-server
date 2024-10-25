@@ -69,7 +69,10 @@ s_gatts_service_inst_t *ble_gap_get_service_instance_by_service_handle(uint16_t 
 void ble_gap_callbacak(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
-void ble_services_name_service_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+/*** ================================================================ Service callbacks definitions start ================================================================ ***/
+
 void ble_services_wifi_service_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+
+/*** ================================================================ Service callbacks definitions end ================================================================ ***/
 
 #endif //  _BLE_H_
