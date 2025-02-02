@@ -228,6 +228,11 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
         }
         break;
     }
+    case ESP_GATTS_RESPONSE_EVT:
+    {
+        ESP_LOGI(TAG, "ESP_GATTS_RESPONSE_EVT(status: %d) for %d", param->rsp.status, param->rsp.handle);
+        break;
+    }
     // These are handled by the callbacks themselves.
     case ESP_GATTS_READ_EVT:
     case ESP_GATTS_WRITE_EVT:

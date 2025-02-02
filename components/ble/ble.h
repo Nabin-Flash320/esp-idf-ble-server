@@ -7,7 +7,11 @@
 
 #define BLE_GATTS_MAX_CHAR_LEN 5
 
+#define BLE_SERVICE_SECURE_SESSION_UUID 0x00E0
 #define BLE_SERVICE_WIFI_UUID 0x00E1
+
+#define BLE_SERVICE_SECURE_SESSION_CHARACTERISTICS_START 0xE001
+#define BLE_SERVICE_SECURE_SESSION_CHARACTERISTICS_STATUS 0xE002
 
 #define BLE_SERVICE_WIFI_CHARACTERISTICS_ENABLE_WIFI_UUID 0xE101
 #define BLE_SERVICE_WIFI_CHARACTERISTICS_GET_WIFI_UUID 0xE102
@@ -16,16 +20,24 @@
 
 typedef enum e_ble_profile_ids
 {
+    BLE_PROFILE_ID_SECURE_SESSION,
     BLE_PROFILE_ID_WIFI,
     BLE_PROFILE_ID_MAX,
 } e_ble_profile_ids_t;
+
+/* ==================== Security service enums ==================== */
+typedef enum e_ble_service_security_char_ids
+{
+    BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_START,
+    BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_STATUS,
+    BLE_SERVICE_SECURITY_CHAR_ID_MAX,
+}e_ble_service_security_char_ids_t;
 
 /* ==================== WiFi service enums ==================== */
 typedef enum e_ble_service_wifi_char_ids
 {
     BLE_SERVICE_WIFI_CHAR_ID_ENABLE_WIFI,
     BLE_SERVICE_WIFI_CHAR_ID_GET_WIFI_DETAILS,
-    BLE_SERVICE_WIFI_CHAR_ID_SCAN_WIFI,
     BLE_SERVICE_WIFI_CHAR_ID_DISABLE_WIFI,
     BLE_SERVICE_WIFI_CHAR_ID_MAX,
 } e_ble_service_wifi_char_ids_t;
@@ -75,6 +87,7 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
 
 /*** ================================================================ Service callbacks definitions start ================================================================ ***/
 
+void ble_services_security_service_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 void ble_services_wifi_service_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
 /*** ================================================================ Service callbacks definitions end ================================================================ ***/

@@ -15,6 +15,37 @@
 
 #define BLE_TAG __FILE__
 
+static s_gatts_char_inst_t service_secure_session_characteristics[BLE_SERVICE_SECURITY_CHAR_ID_MAX] = {
+    [BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_START] = {
+        .char_uuid = {
+            .len = ESP_UUID_LEN_16,
+            .uuid = {
+                .uuid16 = BLE_SERVICE_SECURE_SESSION_CHARACTERISTICS_START,
+            },
+        },
+        .perm = ESP_GATT_PERM_WRITE | ESP_GATT_PERM_READ,
+        .property = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ,
+        .descriptors_len = 0,
+        .descriptors = NULL,
+        .descriptors_added = 0,
+        .added = false,
+    },
+    [BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_STATUS] = {
+        .char_uuid = {
+            .len = ESP_UUID_LEN_16,
+            .uuid = {
+                .uuid16 = BLE_SERVICE_SECURE_SESSION_CHARACTERISTICS_STATUS,
+            },
+        },
+        .perm = ESP_GATT_PERM_READ,              // ESP_GATT_PERM_WRITE | ESP_GATT_PERM_READ,
+        .property = ESP_GATT_CHAR_PROP_BIT_READ, // ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ,
+        .descriptors_len = 0,
+        .descriptors = NULL,
+        .descriptors_added = 0,
+        .added = false,
+    },
+};
+
 static s_gatts_char_inst_t service_wifi_characteristics[BLE_SERVICE_WIFI_CHAR_ID_MAX] = {
     [BLE_SERVICE_WIFI_CHAR_ID_ENABLE_WIFI] = {
         .char_uuid = {
@@ -28,27 +59,13 @@ static s_gatts_char_inst_t service_wifi_characteristics[BLE_SERVICE_WIFI_CHAR_ID
         .descriptors_len = 0,
         .descriptors = NULL,
         .descriptors_added = 0,
-        .added = false
+        .added = false,
     },
     [BLE_SERVICE_WIFI_CHAR_ID_GET_WIFI_DETAILS] = {
         .char_uuid = {
             .len = ESP_UUID_LEN_16,
             .uuid = {
                 .uuid16 = BLE_SERVICE_WIFI_CHARACTERISTICS_GET_WIFI_UUID,
-            },
-        },
-        .perm = ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-        .property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
-        .descriptors_len = 0, // No descriptors for this characteristics
-        .descriptors = NULL,
-        .descriptors_added = 0,
-        .added = false,
-    },
-    [BLE_SERVICE_WIFI_CHAR_ID_SCAN_WIFI] = {
-        .char_uuid = {
-            .len = ESP_UUID_LEN_16,
-            .uuid = {
-                .uuid16 = BLE_SERVICE_NAME_CHARACTERISTICS_SCAN_WIFI_UUID,
             },
         },
         .perm = ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
@@ -70,7 +87,7 @@ static s_gatts_char_inst_t service_wifi_characteristics[BLE_SERVICE_WIFI_CHAR_ID
         .descriptors_len = 0,
         .descriptors = NULL,
         .descriptors_added = 0,
-        .added = false
+        .added = false,
     },
 };
 
@@ -78,6 +95,25 @@ static s_gatts_char_inst_t service_wifi_characteristics[BLE_SERVICE_WIFI_CHAR_ID
     This array holds all the details about required for creating a service along with len and pointer to the characteristics to respective profiles/services.
 */
 static s_gatts_service_inst_t gatt_profiles[BLE_PROFILE_ID_MAX] = {
+    [BLE_PROFILE_ID_SECURE_SESSION] = {
+        .gatts_cb = ble_services_security_service_callback,
+        .gatts_if = ESP_GATT_IF_NONE,
+        .profile_id = BLE_PROFILE_ID_SECURE_SESSION,
+        .characteristics_len = BLE_SERVICE_SECURITY_CHAR_ID_MAX,
+        .characteristics = service_secure_session_characteristics,
+        .num_handle = 1 + (2 * BLE_SERVICE_SECURITY_CHAR_ID_MAX),
+        .characteristics_added = 0,
+        .service_id = {
+            .id = {
+                .uuid = {
+                    .len = ESP_UUID_LEN_16,
+                    .uuid.uuid16 = BLE_SERVICE_SECURE_SESSION_UUID,
+                },
+                .inst_id = 0x00,
+            },
+            .is_primary = true,
+        },
+    },
     [BLE_PROFILE_ID_WIFI] = {
         .gatts_cb = ble_services_wifi_service_callback,
         .gatts_if = ESP_GATT_IF_NONE,
@@ -168,6 +204,7 @@ void ble_init()
     ESP_ERROR_CHECK(esp_ble_gatts_register_callback(ble_gatts_callback));
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(ble_gap_callbacak));
     ble_gap_set_ble_device_name();
+    esp_ble_gatts_app_register(BLE_PROFILE_ID_SECURE_SESSION);
     esp_ble_gatts_app_register(BLE_PROFILE_ID_WIFI);
     ret = esp_ble_gap_config_adv_data(&adv_data);
     if (ret)
