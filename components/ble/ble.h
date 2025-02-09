@@ -7,40 +7,44 @@
 
 #define BLE_GATTS_MAX_CHAR_LEN 5
 
-#define BLE_SERVICE_SECURE_SESSION_UUID 0x00E0
-#define BLE_SERVICE_WIFI_UUID 0x00E1
+#define BLE_SERVICE_SECURE_SESSION_UUID {           \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x76, 0x72, \
+    0x65, 0x73, 0x0E, 0x00, 0x49, 0x54, 0x45, 0x59}
 
-#define BLE_SERVICE_SECURE_SESSION_CHARACTERISTICS_START 0xE001
-#define BLE_SERVICE_SECURE_SESSION_CHARACTERISTICS_STATUS 0xE002
+#define BLE_SERVICE_SECURE_SESSION_WRITE_CHAR_UUID { \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x72, 0x61,  \
+    0x68, 0x63, 0x01, 0xE0, 0x49, 0x54, 0x45, 0x59}
+#define BLE_SERVICE_SECURE_SESSION_STATUS_CHAR_UUID { \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x72, 0x61,   \
+    0x68, 0x63, 0x02, 0xE0, 0x49, 0x54, 0x45, 0x59}
+#define BLE_SERVICE_SECURE_SESSION_READ_CHAR_UUID { \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x72, 0x61, \
+    0x68, 0x63, 0x03, 0xE0, 0x49, 0x54, 0x45, 0x59}
 
-#define BLE_SERVICE_WIFI_CHARACTERISTICS_ENABLE_WIFI_UUID 0xE101
-#define BLE_SERVICE_WIFI_CHARACTERISTICS_GET_WIFI_UUID 0xE102
-#define BLE_SERVICE_NAME_CHARACTERISTICS_SCAN_WIFI_UUID 0xE103
-#define BLE_SERVICE_WIFI_CHARACTERISTICS_DISABLE_WIFI_UUID 0xE104
+#define BLE_SERVUCE_SECURE_SESSION_WRITE_CHAR_DESC_UUID { \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x63, 0x73,       \
+    0x65, 0x64, 0x01, 0xE1, 0x49, 0x54, 0x45, 0x59}
+#define BLE_SERVUCE_SECURE_SESSION_STATUS_CHAR_DESC_UUID { \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x63, 0x73,        \
+    0x65, 0x64, 0x02, 0xE1, 0x49, 0x54, 0x45, 0x59}
+#define BLE_SERVUCE_SECURE_SESSION_READ_CHAR_DESC_UUID { \
+    0x22, 0xad, 0x6b, 0x84, 0xf4, 0xac, 0x63, 0x73,      \
+    0x65, 0x64, 0x02, 0xE1, 0x49, 0x54, 0x45, 0x59}
 
 typedef enum e_ble_profile_ids
 {
     BLE_PROFILE_ID_SECURE_SESSION,
-    BLE_PROFILE_ID_WIFI,
     BLE_PROFILE_ID_MAX,
 } e_ble_profile_ids_t;
 
 /* ==================== Security service enums ==================== */
 typedef enum e_ble_service_security_char_ids
 {
-    BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_START,
-    BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_STATUS,
-    BLE_SERVICE_SECURITY_CHAR_ID_MAX,
-}e_ble_service_security_char_ids_t;
-
-/* ==================== WiFi service enums ==================== */
-typedef enum e_ble_service_wifi_char_ids
-{
-    BLE_SERVICE_WIFI_CHAR_ID_ENABLE_WIFI,
-    BLE_SERVICE_WIFI_CHAR_ID_GET_WIFI_DETAILS,
-    BLE_SERVICE_WIFI_CHAR_ID_DISABLE_WIFI,
-    BLE_SERVICE_WIFI_CHAR_ID_MAX,
-} e_ble_service_wifi_char_ids_t;
+    BLE_SERVICE_SECURE_SESSION_CHAR_WRITE,
+    BLE_SERVICE_SECURE_SESSION_CHAR_STATUS,
+    BLE_SERVICE_SECURE_SESSION_CHAR_READ,
+    BLE_SERVICE_SECURE_SESSION_CHAR_MAX,
+} e_ble_service_security_char_ids_t;
 
 /* ==================== BLE service structs ==================== */
 typedef struct s_gatts_disc_inst
@@ -48,6 +52,8 @@ typedef struct s_gatts_disc_inst
     uint16_t descr_handle;
     esp_bt_uuid_t descr_uuid;
     esp_gatt_perm_t perm;
+    esp_attr_value_t desc_val;
+    esp_attr_control_t ctrl;
     bool added;
 } s_gatts_disc_inst_t;
 
@@ -66,7 +72,7 @@ typedef struct s_gatts_char_inst
 typedef struct s_gatts_service_inst
 {
     esp_gatts_cb_t gatts_cb;
-    uint16_t gatts_if;
+    uint8_t gatts_if;
     uint16_t profile_id;
     uint16_t conn_id;
     uint16_t service_handle;

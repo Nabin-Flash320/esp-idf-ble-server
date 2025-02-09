@@ -27,25 +27,6 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
         ESP_LOGI(TAG, "ESP_GATTS_UNREG_EVT");
         break;
     }
-    case ESP_GATTS_CONNECT_EVT:
-    {
-        ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT\nConn id: %d\nRole: %d\nBLE address: %02x:%02x:%02x:%02x:%02x:%02x\nAddress type: 0x%02x", param->connect.conn_id,
-                 param->connect.link_role, param->connect.remote_bda[0],
-                 param->connect.remote_bda[1], param->connect.remote_bda[2],
-                 param->connect.remote_bda[3], param->connect.remote_bda[4],
-                 param->connect.remote_bda[5], param->connect.ble_addr_type);
-        break;
-    }
-    case ESP_GATTS_DISCONNECT_EVT:
-    {
-        ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT(conn_id: 0x%02x; BLE address: %02x:%02x:%02x:%02x:%02x:%02x; reason: 0x%02x)", param->disconnect.conn_id, param->disconnect.remote_bda[0],
-                 param->disconnect.remote_bda[1], param->disconnect.remote_bda[2],
-                 param->disconnect.remote_bda[3], param->disconnect.remote_bda[4],
-                 param->disconnect.remote_bda[5], param->disconnect.reason);
-        ESP_LOGE(TAG, "Restarting device advertisement");
-        ble_gap_start_ble_advertisement();
-        break;
-    }
     case ESP_GATTS_OPEN_EVT:
     {
         ESP_LOGI(TAG, "ESP_GATTS_OPEN_EVT(status: 0x%x)", param->open.status);
@@ -151,8 +132,8 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
                         esp_ble_gatts_add_char_descr(service_instance->service_handle,
                                                      &characteristics_instance->descriptors[characteristics_instance->descriptors_added].descr_uuid,
                                                      characteristics_instance->descriptors[characteristics_instance->descriptors_added].perm,
-                                                     NULL,
-                                                     NULL);
+                                                     &characteristics_instance->descriptors[characteristics_instance->descriptors_added].desc_val,
+                                                     &characteristics_instance->descriptors[characteristics_instance->descriptors_added].ctrl);
                     }
                     else
                     {
@@ -234,6 +215,23 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
         break;
     }
     // These are handled by the callbacks themselves.
+    case ESP_GATTS_CONNECT_EVT:
+    {
+        ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT\nConn id: %d\nRole: %d\nBLE address: %02x:%02x:%02x:%02x:%02x:%02x\nAddress type: 0x%02x", param->connect.conn_id,
+                 param->connect.link_role, param->connect.remote_bda[0],
+                 param->connect.remote_bda[1], param->connect.remote_bda[2],
+                 param->connect.remote_bda[3], param->connect.remote_bda[4],
+                 param->connect.remote_bda[5], param->connect.ble_addr_type);
+    }
+    case ESP_GATTS_DISCONNECT_EVT:
+    {
+        ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT(conn_id: 0x%02x; BLE address: %02x:%02x:%02x:%02x:%02x:%02x; reason: 0x%02x)", param->disconnect.conn_id, param->disconnect.remote_bda[0],
+                 param->disconnect.remote_bda[1], param->disconnect.remote_bda[2],
+                 param->disconnect.remote_bda[3], param->disconnect.remote_bda[4],
+                 param->disconnect.remote_bda[5], param->disconnect.reason);
+        ESP_LOGE(TAG, "Restarting device advertisement");
+        ble_gap_start_ble_advertisement();
+    }
     case ESP_GATTS_READ_EVT:
     case ESP_GATTS_WRITE_EVT:
     case ESP_GATTS_EXEC_WRITE_EVT:

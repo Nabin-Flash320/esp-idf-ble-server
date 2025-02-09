@@ -3,15 +3,25 @@
 #include <string.h>
 
 #include "esp_log.h"
-#include "mbedtls/ecdh.h"
-#include "mbedtls/ecp.h"
-#include "mbedtls/hkdf.h"
-#include "mbedtls/gcm.h"
-#include "mbedtls/ctr_drbg.h"
+#include "esp_event.h"
 
 #include "ble.h"
+#include "ble_security_srv_pkt_handler.h"
+#include "ble_security_service_enc_dec.h"
+#include "ble_security_service.h"
 
 #define TAG "BLE Security Service"
+
+typedef enum e_ble_session_event
+{
+    BLE_SECURE_SESSION_EVENT_READY_EVENT = SECURE_BLE_PKT_TYPE_READY,
+    BLE_SECURE_SESSION_CLI_PUB_KEY_EVENT = SECURE_BLE_PKT_TYPE_CLI_PUB_KEY,
+    BLE_SECURE_SESSION_SRV_PUB_KEY_REQ_EVENT = SECURE_BLE_PKT_TYPE_SRV_PUB_KEY_REQ,
+    BLE_SECURE_SESSION_READY_SESSION_EVENT = SECURE_BLE_PKT_TYPE_SESS_READY,
+    BLE_SECURE_SESSION_DATA_EVENT = SECURE_BLE_PKT_TYPE_DATA,
+    BLE_SECURE_SESSION_DATA_ACK_EVENT = SECURE_BLE_PKT_TYPE_DATA_ACK,
+    BLE_SECURE_SESSION_EVENT_MAX,
+} e_ble_session_event_t;
 
 typedef struct s_ble_service_security_context
 {
@@ -22,121 +32,68 @@ typedef struct s_ble_service_security_context
     uint8_t session_key[32];        /**< Derived session key */
     uint8_t session_nonce[12];      /**< GCM nonce */
     uint8_t salt[32];               /**< Salt for encryption */
-    bool session_active;            /**< Wehater the session has started */
     uint32_t message_counter;       /**< Total messages encrypted */
 } s_ble_service_security_context_t;
 
-static int ble_secure_session_start_context(uint8_t *public_key, uint16_t len);
-static int ble_secure_session_generate_device_key_value_ecdh();
-static int ble_secure_session_generate_shared_key();
-static int ble_secure_session_generate_session_key();
+typedef struct s_ble_service_security_state_handler
+{
+    s_ble_service_security_context_t context;
+    e_ble_security_service_states_t current_state;
+} s_ble_service_security_state_handler_t;
 
-static s_ble_service_security_context_t ble_secure_session_context;
-static mbedtls_ecp_group group;
-static mbedtls_ctr_drbg_context ctr_drbg;
-static mbedtls_mpi d;
-static mbedtls_ecp_point Q;
-static mbedtls_entropy_context entropy;
-static mbedtls_mpi z;
+static void ble_service_security_session_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
+
+static esp_event_loop_handle_t loop_handle;
+ESP_EVENT_DECLARE_BASE(BLE_SECURE_SESSION);
 
 void ble_services_security_service_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
     switch (event)
     {
+    case ESP_GATTS_CONNECT_EVT:
+    {
+        esp_event_loop_args_t loop_args = {
+            .queue_size = 25,
+            .task_name = "ser-state-mch",
+            .task_priority = 2,
+            .task_stack_size = 4096,
+            .task_core_id = 1,
+        };
+
+        ESP_ERROR_CHECK(esp_event_loop_create(&loop_args, &loop_handle));
+        s_ble_service_security_state_handler_t *state_handler = (s_ble_service_security_state_handler_t *)malloc(sizeof(s_ble_service_security_state_handler_t));
+        assert(state_handler);
+        memset(state_handler, 0, sizeof(s_ble_service_security_state_handler_t));
+        state_handler->current_state = BLE_SECURITY_SERVICE_STATE_IDEAL;
+        ESP_ERROR_CHECK(esp_event_handler_register(BLE_SECURE_SESSION, ESP_EVENT_ANY_BASE, ble_service_security_session_event_handler, state_handler));
+        break;
+    }
+    case ESP_GATTS_DISCONNECT_EVT:
+    {
+        ESP_ERROR_CHECK(esp_event_loop_delete(loop_handle));
+        break;
+    }
     case ESP_GATTS_READ_EVT:
     {
         ESP_LOGI(TAG, "ESP_GATTS_READ_EVT");
-
-        s_gatts_service_inst_t *service_instance = ble_gap_get_service_instance_by_gatts_if(gatts_if);
-        if (service_instance)
-        {
-            int i = 0;
-            for (; i < service_instance->characteristics_len; i++)
-            {
-                if (param->write.handle == service_instance->characteristics[i].char_handle)
-                {
-                    break;
-                }
-            }
-
-            if ((i == BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_START) && (ble_secure_session_context.session_active))
-            {
-                esp_gatt_rsp_t response = {
-                    .attr_value = {
-                        .len = 65,
-                        .handle = param->write.handle,
-                    },
-                };
-
-                memset(response.attr_value.value, 0, sizeof(response.attr_value.value));
-                memcpy(response.attr_value.value, ble_secure_session_context.device_public_key, response.attr_value.len);
-                ESP_LOG_BUFFER_HEXDUMP("Response: ", response.attr_value.value, sizeof(response.attr_value.value), ESP_LOG_ERROR);
-                ESP_ERROR_CHECK(esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, &response));
-            }
-            else
-            {
-                esp_gatt_rsp_t response = {
-                    .attr_value = {
-                        .value[0] = ble_secure_session_context.session_active,
-                        .len = sizeof(ble_secure_session_context.session_active),
-                        .handle = param->read.handle,
-                    },
-                };
-                ESP_ERROR_CHECK(esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, &response));
-            }
-        }
-
+        uint8_t *data = NULL;
         break;
     }
     case ESP_GATTS_WRITE_EVT:
     {
         ESP_LOGI(TAG, "ESP_GATTS_WRITE_EVT for handle: 0x%02x", param->write.handle);
-
         s_gatts_service_inst_t *service_instance = ble_gap_get_service_instance_by_gatts_if(gatts_if);
-        if (service_instance)
+        if (service_instance && service_instance->characteristics_len > 0 && service_instance->characteristics)
         {
-            int i = 0;
-            for (; i < service_instance->characteristics_len; i++)
+            if (param->write.handle == service_instance->characteristics[BLE_SERVICE_SECURE_SESSION_CHAR_WRITE].char_handle)
             {
-                if (param->write.handle == service_instance->characteristics[i].char_handle)
+                s_secure_ble_packet_structure_t *packet = ble_secure_session_read_packet_and_send_event(param->write.value, param->write.len);
+                if (packet && ble_secure_session_is_checksum_valid(packet))
                 {
-                    break;
+                    esp_event_post_to(loop_handle, BLE_SECURE_SESSION, packet->packet_type, packet, SECURE_BLE_TOTAL_PKT_SIZE, 1000 / portTICK_PERIOD_MS);
                 }
-            }
-
-            if (i == BLE_SERVICE_SECURITY_CHAR_ID_SECURE_SESSION_START)
-            {
-                // The public key provided to the device should be of 32 bytes
-                // 64-byte public key (Uncompressed format)
-                uint8_t client_public_key[65] = {
-                    0x04, // Uncompressed format prefix
-                    // X coordinate (32 bytes)
-                    0x6B, 0x17, 0xD1, 0xF2, 0xE1, 0x2C, 0x42, 0x47,
-                    0xF8, 0xBC, 0xE6, 0xE5, 0x63, 0xA4, 0x40, 0xF2,
-                    0x77, 0x03, 0x7D, 0x81, 0x2D, 0xEB, 0x33, 0xA0,
-                    0xF4, 0xA1, 0x39, 0x45, 0xD8, 0x98, 0xC2, 0x96,
-                    // Y coordinate (32 bytes)
-                    0x4F, 0xE3, 0x42, 0xE2, 0xFE, 0x1A, 0x7F, 0x9B,
-                    0x8E, 0xE7, 0xEB, 0x4A, 0x7C, 0x0F, 0x9E, 0x16,
-                    0x2B, 0xCE, 0x33, 0x57, 0x6B, 0x31, 0x5E, 0xCE,
-                    0xCB, 0xB6, 0x40, 0x68, 0x37, 0xBF, 0x51, 0xF5};
-
-                if (!ble_secure_session_context.session_active)
-                {
-                    ble_secure_session_start_context(client_public_key, sizeof(client_public_key));
-                }
-
-                esp_gatt_rsp_t response = {
-                    .attr_value = {
-                        .value[0] = 0x01,
-                        .len = 1,
-                        .handle = param->write.handle,
-                    },
-                };
-                ESP_ERROR_CHECK(esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, &response));
             }
         }
-
         break;
     }
     case ESP_GATTS_EXEC_WRITE_EVT:
@@ -161,188 +118,105 @@ void ble_services_security_service_callback(esp_gatts_cb_event_t event, esp_gatt
     }
 }
 
-static int ble_secure_session_start_context(uint8_t *public_key, uint16_t len)
+static void ble_service_security_session_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
-    if (ble_secure_session_context.session_active)
+    if (BLE_SECURE_SESSION == event_base)
     {
-        ESP_LOGE(TAG, "Errror starting session BLE secure session already started");
-        return -1;
+        s_ble_service_security_state_handler_t *state_handler = (s_ble_service_security_state_handler_t *)event_handler_arg;
+        s_secure_ble_packet_structure_t *packet = (s_secure_ble_packet_structure_t *)event_data;
+        switch (event_id)
+        {
+        case BLE_SECURE_SESSION_EVENT_READY_EVENT:
+        {
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_EVENT_READY_EVENT");
+            if (BLE_SECURITY_SERVICE_STATE_IDEAL == state_handler->current_state)
+            {
+                // Prepare pub-prv keys
+                ble_secure_session_generate_device_key_value_ecdh(state_handler->context.device_public_key, state_handler->context.device_private_key);
+                // Prepare ready ack packet
+                uint8_t *data_ready_packet = NULL;
+                int ret = ble_secure_session_prepare_ready_ack_packet(&data_ready_packet);
+                if (-1 == ret)
+                {
+                    ESP_LOGE(TAG, "Something went wrong");
+                    break;
+                }
+                // Send indication to C2 using READY_ACK
+                // Start timer for 10 sec for cli pub key event
+                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_READY_PACKET_ACK_SENT;
+            }
+            break;
+        }
+        case BLE_SECURE_SESSION_CLI_PUB_KEY_EVENT:
+        {
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_CLI_PUB_KEY_EVENT");
+            if (BLE_SECURITY_SERVICE_STATE_READY_PACKET_ACK_SENT == state_handler->current_state)
+            {
+                // check the valieity of the the cli pub key
+                // Prepare shared secret
+                ble_secure_session_generate_shared_key(state_handler->context.client_public_key, state_handler->context.device_private_key, state_handler->context.shared_secret);
+                // Prepare cli pub key ack packet with status code
+                // Send indication to C2 about client pub key
+                //  Start timer for 10 sec for server pub keu req event
+                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_CLIENT_PUB_KEY_SENT;
+            }
+            break;
+        }
+        case BLE_SECURE_SESSION_SRV_PUB_KEY_REQ_EVENT:
+        {
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_SRV_PUB_KEY_REQ_EVENT");
+            if (BLE_SECURITY_SERVICE_STATE_CLIENT_PUB_KEY_SENT == state_handler->current_state)
+            {
+                // Prepare pub key res packet
+                // Send response to C3 about server's pub key
+                // start timer for 10 sec for session ready event
+                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_SERVER_PUB_KEY_RES;
+            }
+            break;
+        }
+        case BLE_SECURE_SESSION_READY_SESSION_EVENT:
+        {
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_READY_SESSION_EVENT");
+            if (BLE_SECURITY_SERVICE_STATE_SERVER_PUB_KEY_RES == state_handler->current_state)
+            {
+                // Create session key
+                ble_secure_session_generate_session_key(state_handler->context.shared_secret, state_handler->context.session_key, state_handler->context.salt);
+                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_SESSION_STARTED;
+            }
+            break;
+        }
+        case BLE_SECURE_SESSION_DATA_EVENT:
+        {
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_DATA_EVENT");
+            if (BLE_SECURITY_SERVICE_STATE_SESSION_STARTED == state_handler->current_state)
+            {
+                // Send data to the client
+                // Start timer for 10 sec for data ack event
+                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_DATA_SENT;
+            }
+            break;
+        }
+        case BLE_SECURE_SESSION_DATA_ACK_EVENT:
+        {
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_DATA_ACK_EVENT");
+            if (BLE_SECURITY_SERVICE_STATE_DATA_SENT == state_handler->current_state)
+            {
+                // Send data to the client
+                // Start timer for 10 sec for data ack event
+                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_SESSION_STARTED;
+            }
+            break;
+        }
+        case BLE_SECURITY_SERVICE_STATE_TIMEOUT:
+        {
+            ESP_LOGE(TAG, "Timeout event, dropping connection");
+            //  Disconnect the connected device
+            break;
+        }
+        default:
+        {
+            ESP_LOGE(TAG, "Unknown event id: 0x%02x", event_id);
+        }
+        }
     }
-
-    if (len > 65)
-    {
-        ESP_LOGE(TAG, "Error starting session public key length invalid");
-        return -1;
-    }
-
-    memset(&ble_secure_session_context, 0, sizeof(s_ble_service_security_context_t));
-    memcpy(ble_secure_session_context.client_public_key, public_key, len);
-    // Genereate device private and public key
-    ble_secure_session_generate_device_key_value_ecdh();
-    ble_secure_session_generate_shared_key();
-#warning("Use nonce to encrypt data along with session key and then transmit nonce to the client")
-    ble_secure_session_generate_session_key();
-    ble_secure_session_context.session_active = true;
-    ESP_LOG_BUFFER_HEXDUMP("Client pub key", ble_secure_session_context.client_public_key, sizeof(ble_secure_session_context.client_public_key), ESP_LOG_ERROR);
-    printf("\n");
-    ESP_LOG_BUFFER_HEXDUMP("Device prv key", ble_secure_session_context.device_private_key, sizeof(ble_secure_session_context.device_private_key), ESP_LOG_ERROR);
-    printf("\n");
-    ESP_LOG_BUFFER_HEXDUMP("Device pub key", ble_secure_session_context.device_public_key, sizeof(ble_secure_session_context.device_public_key), ESP_LOG_ERROR);
-    printf("\n");
-    ESP_LOG_BUFFER_HEXDUMP("Shared key", ble_secure_session_context.shared_secret, sizeof(ble_secure_session_context.shared_secret), ESP_LOG_ERROR);
-    printf("\n");
-    ESP_LOG_BUFFER_HEXDUMP("Session key", ble_secure_session_context.session_key, sizeof(ble_secure_session_context.session_key), ESP_LOG_ERROR);
-    return 0;
-}
-
-static int ble_secure_session_generate_device_key_value_ecdh()
-{
-    size_t olen;
-
-    mbedtls_ecp_group_init(&group);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
-    mbedtls_entropy_init(&entropy);
-    mbedtls_mpi_init(&d);
-    mbedtls_ecp_point_init(&Q);
-
-    int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error creating seed(error: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error group load(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecdh_gen_public(&group, &d, &Q, mbedtls_ctr_drbg_random, &ctr_drbg);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error generating key pair(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_mpi_write_binary(&d, ble_secure_session_context.device_private_key, 32);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error writing private key(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecp_point_write_binary(&group, &Q,
-                                         MBEDTLS_ECP_PF_UNCOMPRESSED, &olen,
-                                         ble_secure_session_context.device_public_key, sizeof(ble_secure_session_context.device_public_key));
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error writing public key(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-ret_exit:
-    mbedtls_ecp_group_free(&group);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
-    mbedtls_mpi_free(&d);
-    mbedtls_ecp_point_free(&Q);
-
-    return 0;
-}
-
-static int ble_secure_session_generate_shared_key()
-{
-
-    mbedtls_ecp_group_init(&group);
-    mbedtls_mpi_init(&z);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ecp_point_init(&Q);
-    mbedtls_mpi_init(&d);
-
-    int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error creating seed(error: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error group load(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecp_point_read_binary(&group, &Q, ble_secure_session_context.client_public_key, sizeof(ble_secure_session_context.client_public_key));
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error loading client public key(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecp_check_pubkey(&group, &Q);
-    if (ret != 0)
-    {
-        ESP_LOGE(TAG, "Client public key validation failed (error: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_mpi_read_binary(&d, ble_secure_session_context.device_private_key, sizeof(ble_secure_session_context.device_private_key));
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error loading device private key(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_ecdh_compute_shared(&group, &z, &Q, &d, mbedtls_ctr_drbg_random, &ctr_drbg);
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error computing shared key(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-    ret = mbedtls_mpi_write_binary(&z, ble_secure_session_context.shared_secret, sizeof(ble_secure_session_context.shared_secret));
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error copying shared key(eror: %d)", ret);
-        goto ret_exit;
-    }
-
-ret_exit:
-    mbedtls_ecp_group_free(&group);
-    mbedtls_mpi_free(&z);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
-    mbedtls_mpi_free(&d);
-    mbedtls_ecp_point_free(&Q);
-
-    return 0;
-}
-
-static int ble_secure_session_generate_session_key()
-{
-#warning("Use salt to create randomness in future")
-    const char *info = "BLE Secure Session Key";
-
-    int ret = mbedtls_hkdf(
-        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-        ble_secure_session_context.salt,
-        sizeof(ble_secure_session_context.salt),
-        ble_secure_session_context.shared_secret,
-        sizeof(ble_secure_session_context.shared_secret),
-        (uint8_t *)info,
-        strlen(info),
-        ble_secure_session_context.session_key,
-        sizeof(ble_secure_session_context.session_key));
-
-    if (0 != ret)
-    {
-        ESP_LOGE(TAG, "Error generating session key");
-        return -1;
-    }
-
-    return 0;
 }
