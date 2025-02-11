@@ -2,6 +2,7 @@
 #include "string.h"
 #include "stdio.h"
 
+#include "esp_log.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/ecp.h"
 #include "mbedtls/hkdf.h"
@@ -33,7 +34,7 @@ const uint8_t client_public_key[65] = {
     0x2B, 0xCE, 0x33, 0x57, 0x6B, 0x31, 0x5E, 0xCE,
     0xCB, 0xB6, 0x40, 0x68, 0x37, 0xBF, 0x51, 0xF5};
 
-static int ble_secure_session_generate_device_key_value_ecdh(uint8_t device_public_key[65], uint8_t device_private_key[32])
+int ble_secure_session_generate_device_key_value_ecdh(uint8_t device_public_key[65], uint8_t device_private_key[32])
 {
     size_t olen;
 
@@ -71,7 +72,7 @@ static int ble_secure_session_generate_device_key_value_ecdh(uint8_t device_publ
         goto ret_exit;
     }
 
-    ret = mbedtls_ecp_point_write_binary(&group, &Q, MBEDTLS_ECP_PF_UNCOMPRESSED, &olen, device_public_key, sizeof(device_public_key));
+    ret = mbedtls_ecp_point_write_binary(&group, &Q, MBEDTLS_ECP_PF_UNCOMPRESSED, &olen, device_public_key, 65);
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error writing public key(eror: %d)", ret);
@@ -88,9 +89,8 @@ ret_exit:
     return 0;
 }
 
-static int ble_secure_session_generate_shared_key(uint8_t client_public_key[65], uint8_t device_private_key[32], uint8_t shared_secret[32])
+int ble_secure_session_generate_shared_key(uint8_t client_public_key[65], uint8_t device_private_key[32], uint8_t shared_secret[32])
 {
-
     mbedtls_ecp_group_init(&group);
     mbedtls_mpi_init(&z);
     mbedtls_ctr_drbg_init(&ctr_drbg);
@@ -102,6 +102,7 @@ static int ble_secure_session_generate_shared_key(uint8_t client_public_key[65],
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error creating seed(error: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
@@ -109,13 +110,15 @@ static int ble_secure_session_generate_shared_key(uint8_t client_public_key[65],
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error group load(eror: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
-    ret = mbedtls_ecp_point_read_binary(&group, &Q, client_public_key, sizeof(client_public_key));
+    ret = mbedtls_ecp_point_read_binary(&group, &Q, client_public_key, 65);
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error loading client public key(eror: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
@@ -123,13 +126,15 @@ static int ble_secure_session_generate_shared_key(uint8_t client_public_key[65],
     if (ret != 0)
     {
         ESP_LOGE(TAG, "Client public key validation failed (error: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
-    ret = mbedtls_mpi_read_binary(&d, device_private_key, sizeof(device_private_key));
+    ret = mbedtls_mpi_read_binary(&d, device_private_key, 32);
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error loading device private key(eror: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
@@ -137,13 +142,15 @@ static int ble_secure_session_generate_shared_key(uint8_t client_public_key[65],
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error computing shared key(eror: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
-    ret = mbedtls_mpi_write_binary(&z, shared_secret, sizeof(shared_secret));
+    ret = mbedtls_mpi_write_binary(&z, shared_secret, 32);
     if (0 != ret)
     {
         ESP_LOGE(TAG, "Error copying shared key(eror: %d)", ret);
+        ret = -1;
         goto ret_exit;
     }
 
@@ -155,10 +162,10 @@ ret_exit:
     mbedtls_mpi_free(&d);
     mbedtls_ecp_point_free(&Q);
 
-    return 0;
+    return ret;
 }
 
-static int ble_secure_session_generate_session_key(uint8_t shared_secret[32], uint8_t session_key[32], uint8_t salt[32])
+int ble_secure_session_generate_session_key(uint8_t shared_secret[32], uint8_t session_key[32], uint8_t salt[32])
 {
 #warning("Use salt to create randomness in future")
     const char *info = "BLE Secure Session Key";
@@ -166,13 +173,13 @@ static int ble_secure_session_generate_session_key(uint8_t shared_secret[32], ui
     int ret = mbedtls_hkdf(
         mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
         salt,
-        sizeof(salt),
+        32,
         shared_secret,
-        sizeof(shared_secret),
+        32,
         (uint8_t *)info,
         strlen(info),
         session_key,
-        sizeof(session_key));
+        32);
 
     if (0 != ret)
     {
@@ -181,4 +188,39 @@ static int ble_secure_session_generate_session_key(uint8_t shared_secret[32], ui
     }
 
     return 0;
+}
+
+int ble_secure_session_is_pub_key_valid(uint8_t pub_key_to_check[65])
+{
+    mbedtls_ecp_group_init(&group);
+    mbedtls_ecp_point_init(&Q);
+
+    int ret = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1);
+    if (0 != ret)
+    {
+        ESP_LOGE(TAG, "Error group load(eror: %d)", ret);
+        ret = -1;
+        goto ret_exit;
+    }
+
+    ret = mbedtls_ecp_point_read_binary(&group, &Q, client_public_key, 65);
+    if (0 != ret)
+    {
+        ESP_LOGE(TAG, "Error loading client public key(eror: %d)", ret);
+        ret = -1;
+        goto ret_exit;
+    }
+
+    ret = mbedtls_ecp_check_pubkey(&group, &Q);
+    if (ret != 0)
+    {
+        ESP_LOGE(TAG, "Client public key validation failed (error: %d)", ret);
+        ret = -1;
+        goto ret_exit;
+    }
+
+ret_exit:
+    mbedtls_ecp_group_free(&group);
+    mbedtls_ecp_point_free(&Q);
+    return 0 == ret ? 0 : -1;
 }

@@ -12,15 +12,14 @@
 
 s_secure_ble_packet_structure_t *ble_secure_session_read_packet(uint8_t *data, size_t len)
 {
-    if(len != SECURE_BLE_TOTAL_PKT_SIZE)
+    if (len != SECURE_BLE_TOTAL_PKT_SIZE)
     {
         ESP_LOGI(BLE_SECURE_SERVICE_PKT_TAG, "Pakcet size expected %d got %d", SECURE_BLE_TOTAL_PKT_SIZE, len);
         return NULL;
     }
 
-
-    s_secure_ble_packet_structure_t *packet = (s_secure_ble_packet_structure_t*)malloc(sizeof(s_secure_ble_packet_structure_t));
-    if(!packet)
+    s_secure_ble_packet_structure_t *packet = (s_secure_ble_packet_structure_t *)malloc(sizeof(s_secure_ble_packet_structure_t));
+    if (!packet)
     {
         ESP_LOGE(BLE_SECURE_SERVICE_PKT_TAG, "Unable to allocate memory for packet");
         return NULL;
@@ -33,7 +32,7 @@ s_secure_ble_packet_structure_t *ble_secure_session_read_packet(uint8_t *data, s
 
 bool ble_secure_session_is_checksum_valid(s_secure_ble_packet_structure_t *packet)
 {
-    if(!packet)
+    if (!packet)
     {
         ESP_LOGE(BLE_SECURE_SERVICE_PKT_TAG, "Innvalid packet");
         return false;
@@ -41,13 +40,13 @@ bool ble_secure_session_is_checksum_valid(s_secure_ble_packet_structure_t *packe
 
     uint8_t packet_checksum[SECURE_BLE_CHECKSUM_SIZE];
     memcpy(packet_checksum, packet->checksum, SECURE_BLE_CHECKSUM_SIZE);
-    uint32_t crc_claculated = esp_rom_crc32_le(0, (uint8_t*)packet, SECURE_BLE_TOTAL_PKT_SIZE - SECURE_BLE_CHECKSUM_SIZE);
-    if(0 != memcmp(packet_checksum, &crc_claculated, SECURE_BLE_CHECKSUM_SIZE))
+    uint32_t crc_claculated = esp_rom_crc32_le(0, (uint8_t *)packet, SECURE_BLE_TOTAL_PKT_SIZE - SECURE_BLE_CHECKSUM_SIZE);
+    if (0 != memcmp(packet_checksum, &crc_claculated, SECURE_BLE_CHECKSUM_SIZE))
     {
         ESP_LOGE(BLE_SECURE_SERVICE_PKT_TAG, "Invalid data, checksum didn't match");
         return false;
     }
-    
+
     return true;
 }
 
@@ -68,7 +67,6 @@ int ble_secure_session_prepare_ready_ack_packet(uint8_t **ready_packet_buffer)
     memset(ready_ack_packet.checksum, 0, SECURE_BLE_CHECKSUM_SIZE);
     uint32_t crc = esp_rom_crc32_le(0, (uint8_t *)&ready_ack_packet, SECURE_BLE_TOTAL_PKT_SIZE - SECURE_BLE_CHECKSUM_SIZE);
     memcpy(ready_ack_packet.checksum, &crc, SECURE_BLE_CHECKSUM_SIZE);
-    // ESP_LOG_BUFFER_HEXDUMP("READY_ACK struct", (uint8_t*)&ready_ack_packet, SECURE_BLE_TOTAL_PKT_SIZE, ESP_LOG_ERROR);
     *ready_packet_buffer = (uint8_t *)malloc(SECURE_BLE_TOTAL_PKT_SIZE);
     if (!*ready_packet_buffer)
     {
@@ -78,7 +76,6 @@ int ble_secure_session_prepare_ready_ack_packet(uint8_t **ready_packet_buffer)
 
     memset(*ready_packet_buffer, 0, SECURE_BLE_TOTAL_PKT_SIZE);
     memcpy(*ready_packet_buffer, (uint8_t *)&ready_ack_packet, SECURE_BLE_TOTAL_PKT_SIZE);
-    // ESP_LOG_BUFFER_HEXDUMP("READY_ACK buffer", *ready_packet_buffer, SECURE_BLE_TOTAL_PKT_SIZE, ESP_LOG_ERROR);
     return 0;
 }
 
@@ -102,7 +99,6 @@ int ble_secure_session_prepare_cli_pub_key_status_packet(uint8_t **cli_pub_key_s
     memset(cli_pub_key_status_ack_packet.checksum, 0, SECURE_BLE_CHECKSUM_SIZE);
     uint32_t crc = esp_rom_crc32_le(0, (uint8_t *)&cli_pub_key_status_ack_packet, SECURE_BLE_TOTAL_PKT_SIZE - SECURE_BLE_CHECKSUM_SIZE);
     memcpy(cli_pub_key_status_ack_packet.checksum, &crc, SECURE_BLE_CHECKSUM_SIZE);
-    ESP_LOG_BUFFER_HEXDUMP("READY_ACK struct", (uint8_t *)&cli_pub_key_status_ack_packet, SECURE_BLE_TOTAL_PKT_SIZE, ESP_LOG_ERROR);
 
     *cli_pub_key_status_packet_buffer = (uint8_t *)malloc(SECURE_BLE_TOTAL_PKT_SIZE);
     if (!*cli_pub_key_status_packet_buffer)
@@ -113,7 +109,6 @@ int ble_secure_session_prepare_cli_pub_key_status_packet(uint8_t **cli_pub_key_s
 
     memset(*cli_pub_key_status_packet_buffer, 0, SECURE_BLE_TOTAL_PKT_SIZE);
     memcpy(*cli_pub_key_status_packet_buffer, (uint8_t *)&cli_pub_key_status_ack_packet, SECURE_BLE_TOTAL_PKT_SIZE);
-    ESP_LOG_BUFFER_HEXDUMP("READY_ACK buffer", *cli_pub_key_status_packet_buffer, SECURE_BLE_TOTAL_PKT_SIZE, ESP_LOG_ERROR);
     return 0;
 }
 
@@ -137,7 +132,6 @@ int ble_secure_session_prepare_srv_pub_key_res_packet(uint8_t **srv_pub_key_pack
     memset(srv_pub_key_res_packet.checksum, 0, SECURE_BLE_CHECKSUM_SIZE);
     uint32_t crc = esp_rom_crc32_le(0, (uint8_t *)&srv_pub_key_res_packet, SECURE_BLE_TOTAL_PKT_SIZE - SECURE_BLE_CHECKSUM_SIZE);
     memcpy(srv_pub_key_res_packet.checksum, &crc, SECURE_BLE_CHECKSUM_SIZE);
-    ESP_LOG_BUFFER_HEXDUMP("READY_ACK struct", (uint8_t *)&srv_pub_key_res_packet, SECURE_BLE_TOTAL_PKT_SIZE, ESP_LOG_ERROR);
 
     *srv_pub_key_packet_buffer = (uint8_t *)malloc(SECURE_BLE_TOTAL_PKT_SIZE);
     if (!*srv_pub_key_packet_buffer)
@@ -148,7 +142,6 @@ int ble_secure_session_prepare_srv_pub_key_res_packet(uint8_t **srv_pub_key_pack
 
     memset(*srv_pub_key_packet_buffer, 0, SECURE_BLE_TOTAL_PKT_SIZE);
     memcpy(*srv_pub_key_packet_buffer, (uint8_t *)&srv_pub_key_res_packet, SECURE_BLE_TOTAL_PKT_SIZE);
-    ESP_LOG_BUFFER_HEXDUMP("READY_ACK buffer", *srv_pub_key_packet_buffer, SECURE_BLE_TOTAL_PKT_SIZE, ESP_LOG_ERROR);
     return 0;
 }
 

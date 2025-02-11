@@ -20,6 +20,7 @@ typedef enum e_ble_session_event
     BLE_SECURE_SESSION_READY_SESSION_EVENT = SECURE_BLE_PKT_TYPE_SESS_READY,
     BLE_SECURE_SESSION_DATA_EVENT = SECURE_BLE_PKT_TYPE_DATA,
     BLE_SECURE_SESSION_DATA_ACK_EVENT = SECURE_BLE_PKT_TYPE_DATA_ACK,
+    BLE_SECURE_SESSION_STATE_TIMEOUT = SECURE_BLE_PKT_TYPE_TIMEOUT,
     BLE_SECURE_SESSION_EVENT_MAX,
 } e_ble_session_event_t;
 
@@ -42,9 +43,11 @@ typedef struct s_ble_service_security_state_handler
 } s_ble_service_security_state_handler_t;
 
 static void ble_service_security_session_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
+static int ble_service_security_send_notification_packet(uint8_t *packet_buffer);
 
 static esp_event_loop_handle_t loop_handle;
 ESP_EVENT_DECLARE_BASE(BLE_SECURE_SESSION);
+ESP_EVENT_DEFINE_BASE(BLE_SECURE_SESSION);
 
 void ble_services_security_service_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
@@ -65,7 +68,7 @@ void ble_services_security_service_callback(esp_gatts_cb_event_t event, esp_gatt
         assert(state_handler);
         memset(state_handler, 0, sizeof(s_ble_service_security_state_handler_t));
         state_handler->current_state = BLE_SECURITY_SERVICE_STATE_IDEAL;
-        ESP_ERROR_CHECK(esp_event_handler_register(BLE_SECURE_SESSION, ESP_EVENT_ANY_BASE, ble_service_security_session_event_handler, state_handler));
+        ESP_ERROR_CHECK(esp_event_handler_register_with(loop_handle, BLE_SECURE_SESSION, ESP_EVENT_ANY_ID, ble_service_security_session_event_handler, state_handler));
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
@@ -76,20 +79,20 @@ void ble_services_security_service_callback(esp_gatts_cb_event_t event, esp_gatt
     case ESP_GATTS_READ_EVT:
     {
         ESP_LOGI(TAG, "ESP_GATTS_READ_EVT");
-        uint8_t *data = NULL;
         break;
     }
     case ESP_GATTS_WRITE_EVT:
     {
-        ESP_LOGI(TAG, "ESP_GATTS_WRITE_EVT for handle: 0x%02x", param->write.handle);
+        ESP_LOGI(TAG, "ESP_GATTS_WRITE_EVT for handle: 0x%02x(conn-id: %d)", param->write.handle, param->write.conn_id);
         s_gatts_service_inst_t *service_instance = ble_gap_get_service_instance_by_gatts_if(gatts_if);
         if (service_instance && service_instance->characteristics_len > 0 && service_instance->characteristics)
         {
             if (param->write.handle == service_instance->characteristics[BLE_SERVICE_SECURE_SESSION_CHAR_WRITE].char_handle)
             {
-                s_secure_ble_packet_structure_t *packet = ble_secure_session_read_packet_and_send_event(param->write.value, param->write.len);
+                s_secure_ble_packet_structure_t *packet = ble_secure_session_read_packet(param->write.value, param->write.len);
                 if (packet && ble_secure_session_is_checksum_valid(packet))
                 {
+                    // ESP_LOG_BUFFER_HEXDUMP("Server write event", param->write.value, param->write.len, ESP_LOG_ERROR);
                     esp_event_post_to(loop_handle, BLE_SECURE_SESSION, packet->packet_type, packet, SECURE_BLE_TOTAL_PKT_SIZE, 1000 / portTICK_PERIOD_MS);
                 }
             }
@@ -134,17 +137,26 @@ static void ble_service_security_session_event_handler(void *event_handler_arg, 
                 // Prepare pub-prv keys
                 ble_secure_session_generate_device_key_value_ecdh(state_handler->context.device_public_key, state_handler->context.device_private_key);
                 // Prepare ready ack packet
-                uint8_t *data_ready_packet = NULL;
-                int ret = ble_secure_session_prepare_ready_ack_packet(&data_ready_packet);
+                uint8_t *ready_ack_packet_buffer = NULL;
+                int ret = ble_secure_session_prepare_ready_ack_packet(&ready_ack_packet_buffer);
                 if (-1 == ret)
                 {
                     ESP_LOGE(TAG, "Something went wrong");
                     break;
                 }
+
                 // Send indication to C2 using READY_ACK
+                ESP_LOGI(TAG, "Sending ready ack packet\n");
+                if (-1 == ble_service_security_send_notification_packet(ready_ack_packet_buffer))
+                {
+                    ESP_LOGE(TAG, "Error sending ready ack packet");
+                    break;
+                }
+
                 // Start timer for 10 sec for cli pub key event
                 state_handler->current_state = BLE_SECURITY_SERVICE_STATE_READY_PACKET_ACK_SENT;
             }
+
             break;
         }
         case BLE_SECURE_SESSION_CLI_PUB_KEY_EVENT:
@@ -152,26 +164,72 @@ static void ble_service_security_session_event_handler(void *event_handler_arg, 
             ESP_LOGI(TAG, "BLE_SECURE_SESSION_CLI_PUB_KEY_EVENT");
             if (BLE_SECURITY_SERVICE_STATE_READY_PACKET_ACK_SENT == state_handler->current_state)
             {
+                uint16_t cli_pub_key_status = 0x0001;
                 // check the valieity of the the cli pub key
-                // Prepare shared secret
-                ble_secure_session_generate_shared_key(state_handler->context.client_public_key, state_handler->context.device_private_key, state_handler->context.shared_secret);
+                memset(state_handler->context.client_public_key, 0, 65);
+                memcpy(state_handler->context.client_public_key, packet->payload_data, 65);
+                if (-1 == ble_secure_session_is_pub_key_valid(state_handler->context.client_public_key))
+                {
+                    ESP_LOGE(TAG, "Invalid client public key");
+                    cli_pub_key_status = 0xFFFF;
+                }
+                else
+                {
+                    // Prepare shared secret
+                    if (-1 == ble_secure_session_generate_shared_key(state_handler->context.client_public_key, state_handler->context.device_private_key, state_handler->context.shared_secret))
+                    {
+                        cli_pub_key_status = 0xFFFF;
+                    }
+                }
+
                 // Prepare cli pub key ack packet with status code
+                uint8_t *cli_pub_key_status_packet_buffer = NULL;
+                if (-1 == ble_secure_session_prepare_cli_pub_key_status_packet(&cli_pub_key_status_packet_buffer, cli_pub_key_status))
+                {
+                    ESP_LOGE(TAG, "Somthing went wrong");
+                    break;
+                }
+
                 // Send indication to C2 about client pub key
-                //  Start timer for 10 sec for server pub keu req event
+                ESP_LOGI(TAG, "Sending client public key status packet\n");
+                if (-1 == ble_service_security_send_notification_packet(cli_pub_key_status_packet_buffer))
+                {
+                    ESP_LOGE(TAG, "Error sending client public key status packet");
+                    break;
+                }
+
                 state_handler->current_state = BLE_SECURITY_SERVICE_STATE_CLIENT_PUB_KEY_SENT;
+                //  Start timer for 10 sec for server pub keu req event
+                free(cli_pub_key_status_packet_buffer);
             }
+
             break;
         }
         case BLE_SECURE_SESSION_SRV_PUB_KEY_REQ_EVENT:
         {
-            ESP_LOGI(TAG, "BLE_SECURE_SESSION_SRV_PUB_KEY_REQ_EVENT");
+            ESP_LOGI(TAG, "BLE_SECURE_SESSION_SRV_PUB_KEY_REQ_EVENT(%d, %d)", BLE_SECURITY_SERVICE_STATE_CLIENT_PUB_KEY_SENT, state_handler->current_state);
             if (BLE_SECURITY_SERVICE_STATE_CLIENT_PUB_KEY_SENT == state_handler->current_state)
             {
                 // Prepare pub key res packet
-                // Send response to C3 about server's pub key
+                uint8_t *srv_pub_key_res_packet_buffer = NULL;
+                int ret = ble_secure_session_prepare_srv_pub_key_res_packet(&srv_pub_key_res_packet_buffer, state_handler->context.device_public_key);
+                if (-1 == ret)
+                {
+                    ESP_LOGE(TAG, "Something went wrong");
+                    break;
+                }
+
+                // Send response to C2 about server's pub key
+                ESP_LOGI(TAG, "Sending indication to client with server's public key\n");
+                if (-1 == ble_service_security_send_notification_packet(srv_pub_key_res_packet_buffer))
+                {
+                    ESP_LOGE(TAG, "Error sending ready ack packet");
+                    break;
+                }
                 // start timer for 10 sec for session ready event
                 state_handler->current_state = BLE_SECURITY_SERVICE_STATE_SERVER_PUB_KEY_RES;
             }
+
             break;
         }
         case BLE_SECURE_SESSION_READY_SESSION_EVENT:
@@ -180,9 +238,16 @@ static void ble_service_security_session_event_handler(void *event_handler_arg, 
             if (BLE_SECURITY_SERVICE_STATE_SERVER_PUB_KEY_RES == state_handler->current_state)
             {
                 // Create session key
-                ble_secure_session_generate_session_key(state_handler->context.shared_secret, state_handler->context.session_key, state_handler->context.salt);
+                int ret = ble_secure_session_generate_session_key(state_handler->context.shared_secret, state_handler->context.session_key, state_handler->context.salt);
+                if (-1 == ret)
+                {
+                    ESP_LOGE(TAG, "Something went wrong");
+                    break;
+                }
+
                 state_handler->current_state = BLE_SECURITY_SERVICE_STATE_SESSION_STARTED;
             }
+
             break;
         }
         case BLE_SECURE_SESSION_DATA_EVENT:
@@ -190,10 +255,9 @@ static void ble_service_security_session_event_handler(void *event_handler_arg, 
             ESP_LOGI(TAG, "BLE_SECURE_SESSION_DATA_EVENT");
             if (BLE_SECURITY_SERVICE_STATE_SESSION_STARTED == state_handler->current_state)
             {
-                // Send data to the client
-                // Start timer for 10 sec for data ack event
-                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_DATA_SENT;
+                // Process incoming data
             }
+
             break;
         }
         case BLE_SECURE_SESSION_DATA_ACK_EVENT:
@@ -201,13 +265,12 @@ static void ble_service_security_session_event_handler(void *event_handler_arg, 
             ESP_LOGI(TAG, "BLE_SECURE_SESSION_DATA_ACK_EVENT");
             if (BLE_SECURITY_SERVICE_STATE_DATA_SENT == state_handler->current_state)
             {
-                // Send data to the client
-                // Start timer for 10 sec for data ack event
-                state_handler->current_state = BLE_SECURITY_SERVICE_STATE_SESSION_STARTED;
+                // Process data ack event
             }
+
             break;
         }
-        case BLE_SECURITY_SERVICE_STATE_TIMEOUT:
+        case BLE_SECURE_SESSION_STATE_TIMEOUT:
         {
             ESP_LOGE(TAG, "Timeout event, dropping connection");
             //  Disconnect the connected device
@@ -215,8 +278,37 @@ static void ble_service_security_session_event_handler(void *event_handler_arg, 
         }
         default:
         {
-            ESP_LOGE(TAG, "Unknown event id: 0x%02x", event_id);
+            ESP_LOGE(TAG, "Unknown event id: %ld", event_id);
         }
         }
     }
 }
+
+static int ble_service_security_send_notification_packet(uint8_t *packet_buffer)
+{
+    if (!packet_buffer)
+    {
+        ESP_LOGE(TAG, "Packet buffer null");
+        return -1;
+    }
+
+    s_gatts_service_inst_t *service_instance = ble_gap_get_service_instance_by_id(BLE_PROFILE_ID_SECURE_SESSION);
+    if (!service_instance || 0 == service_instance->characteristics_len)
+    {
+        ESP_LOGE(TAG, "Invalid service instance");
+        return -1;
+    }
+
+    ESP_ERROR_CHECK(
+        esp_ble_gatts_send_indicate(
+            service_instance->gatts_if,
+            service_instance->conn_id,
+            service_instance->characteristics[BLE_SERVICE_SECURE_SESSION_CHAR_STATUS].char_handle,
+            SECURE_BLE_TOTAL_PKT_SIZE,
+            packet_buffer,
+            false));
+
+    return 0;
+}
+
+

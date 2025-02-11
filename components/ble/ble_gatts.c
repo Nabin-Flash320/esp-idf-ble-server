@@ -19,7 +19,7 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
     }
     case ESP_GATTS_CONF_EVT:
     {
-        ESP_LOGI(TAG, "ESP_GATTS_CONF_EVT");
+        ESP_LOGI(TAG, "ESP_GATTS_CONF_EVT(status: %d; handle: %d; connid: %d)", param->conf.status, param->conf.handle, param->conf.conn_id);
         break;
     }
     case ESP_GATTS_UNREG_EVT:
@@ -222,6 +222,13 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
                  param->connect.remote_bda[1], param->connect.remote_bda[2],
                  param->connect.remote_bda[3], param->connect.remote_bda[4],
                  param->connect.remote_bda[5], param->connect.ble_addr_type);
+        s_gatts_service_inst_t *service_instance = ble_gap_get_service_instance_by_gatts_if(gatts_if);
+        if (service_instance && service_instance->gatts_cb)
+        {
+            service_instance->conn_id = param->connect.conn_id;
+            service_instance->gatts_cb(event, gatts_if, param);
+        }
+        break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
     {
@@ -231,6 +238,12 @@ void ble_gatts_callback(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_
                  param->disconnect.remote_bda[5], param->disconnect.reason);
         ESP_LOGE(TAG, "Restarting device advertisement");
         ble_gap_start_ble_advertisement();
+        s_gatts_service_inst_t *service_instance = ble_gap_get_service_instance_by_gatts_if(gatts_if);
+        if (service_instance && service_instance->gatts_cb)
+        {
+            service_instance->gatts_cb(event, gatts_if, param);
+        }
+        break;
     }
     case ESP_GATTS_READ_EVT:
     case ESP_GATTS_WRITE_EVT:

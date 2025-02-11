@@ -20,6 +20,7 @@
 #define SECURE_BLE_PKT_TYPE_SESS_READY 0x07
 #define SECURE_BLE_PKT_TYPE_DATA 0x08
 #define SECURE_BLE_PKT_TYPE_DATA_ACK 0x09
+#define SECURE_BLE_PKT_TYPE_TIMEOUT 0x0A
 #define SECURE_BLE_PKT_TYPE_INVALID 0xFF
 
 #define SECURE_BLE_PAYLOAD_TYPE_UNDEFINED 0xFF // While transmitting unencrypted payload i.e. during key exchange
@@ -46,7 +47,7 @@ typedef struct s_secure_ble_packet_structure
     uint8_t checksum[SECURE_BLE_CHECKSUM_SIZE];
 } s_secure_ble_packet_structure_t;
 
-s_secure_ble_packet_structure_t *ble_secure_session_read_packet_and_send_event(uint8_t *data, size_t len);
+s_secure_ble_packet_structure_t *ble_secure_session_read_packet(uint8_t *data, size_t len);
 bool ble_secure_session_is_checksum_valid(s_secure_ble_packet_structure_t *packet);
 
 int ble_secure_session_prepare_ready_ack_packet(uint8_t **ready_packet_buffer);
